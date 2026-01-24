@@ -688,6 +688,186 @@ TEST_F(FilterTest, TimeoutFilterConfigured) {
   EXPECT_FLOAT_EQ(received_value, 99.0f);
 }
 
+TEST_F(FilterTest, OrFilter) {
+  // Setup: Two lambda filters.
+  // Filter 1: Returns value + 10 if enabled.
+  // Filter 2: Returns value + 20 always.
+
+  bool f1_enabled = true;
+  auto l1 = [&](float value) -> optional<float> {
+    if (f1_enabled)
+      return value + 10.0f;
+    return {};
+  };
+  LambdaFilter f1(l1);
+
+  auto l2 = [](float value) -> optional<float> { return value + 20.0f; };
+  LambdaFilter f2(l2);
+
+  OrFilter filter({&f1, &f2});
+  sensor_.add_filter(&filter);
+
+  float received_value = NAN;
+  int callback_count = 0;
+  sensor_.add_on_state_callback([&](float value) {
+    received_value = value;
+    callback_count++;
+  });
+
+  // Case 1: f1 is enabled. It should trigger. f2 should also run but its output should be ignored by OrFilter latch.
+  sensor_.publish_state(0.0f);
+  EXPECT_EQ(callback_count, 1);
+  EXPECT_FLOAT_EQ(received_value, 10.0f);
+
+  // Case 2: f1 is disabled. f1 returns empty. f2 runs and should trigger.
+  f1_enabled = false;
+  // Update the lambda in the filter because std::function holds a copy of the closure,
+  // but we captured by reference [&], so the reference inside the copy points to our stack bool.
+  // So strictly speaking, changing f1_enabled should work without re-setting,
+  // PROVIDED the lambda object was copied correctly and simply holds the reference.
+  // C++ lambdas with [&] capture reference members. Copying the lambda copies the references (which are just pointers).
+  // So this should work directly.
+
+  sensor_.publish_state(0.0f);
+  EXPECT_EQ(callback_count, 2);
+  EXPECT_FLOAT_EQ(received_value, 20.0f);
+}
+
+TEST_F(FilterTest, ToNTCTemperatureFilter) {
+  // Standard 10k thermistor coefficients
+  // A = 1.129148e-3, B = 2.34125e-4, C = 8.76741e-8
+  double a = 1.129148e-3;
+  double b = 2.34125e-4;
+  double c = 8.76741e-8;
+
+  ToNTCTemperatureFilter filter(a, b, c);
+  sensor_.add_filter(&filter);
+
+  float received_value = NAN;
+  sensor_.add_on_state_callback([&](float value) { received_value = value; });
+
+  // 10k ohms -> approx 25C (298.15K)
+  sensor_.publish_state(10000.0f);
+  // Allow small error margin due to float precision and coefficient approximation
+  EXPECT_NEAR(received_value, 25.0f, 0.05f);
+
+  // 32650 ohms -> approx 0C
+  // log(32650) = 10.3936
+  sensor_.publish_state(32650.0f);
+  EXPECT_NEAR(received_value, 0.0f, 0.1f);
+}
+
+TEST_F(FilterTest, ToNTCResistanceFilter) {
+  // Standard 10k thermistor coefficients
+  double a = 1.129148e-3;
+  double b = 2.34125e-4;
+  double c = 8.76741e-8;
+
+  ToNTCResistanceFilter filter(a, b, c);
+  sensor_.add_filter(&filter);
+
+  float received_value = NAN;
+  sensor_.add_on_state_callback([&](float value) { received_value = value; });
+
+  // 25C -> approx 10k ohms
+  sensor_.publish_state(25.0f);
+  EXPECT_NEAR(received_value, 10000.0f, 5.0f);  // Resistance can vary quite a bit with small temp changes
+
+  // 0C -> approx 32650 ohms
+  sensor_.publish_state(0.0f);
+  EXPECT_NEAR(received_value, 32650.0f, 20.0f);
+}
+
+TEST_F(FilterTest, OrFilter) {
+  // Setup: Two lambda filters.
+  // Filter 1: Returns value + 10 if enabled.
+  // Filter 2: Returns value + 20 always.
+
+  bool f1_enabled = true;
+  auto l1 = [&](float value) -> optional<float> {
+    if (f1_enabled)
+      return value + 10.0f;
+    return {};
+  };
+  LambdaFilter f1(l1);
+
+  auto l2 = [](float value) -> optional<float> { return value + 20.0f; };
+  LambdaFilter f2(l2);
+
+  OrFilter filter({&f1, &f2});
+  sensor_.add_filter(&filter);
+
+  float received_value = NAN;
+  int callback_count = 0;
+  sensor_.add_on_state_callback([&](float value) {
+    received_value = value;
+    callback_count++;
+  });
+
+  // Case 1: f1 is enabled. It should trigger. f2 should also run but its output should be ignored by OrFilter latch.
+  sensor_.publish_state(0.0f);
+  EXPECT_EQ(callback_count, 1);
+  EXPECT_FLOAT_EQ(received_value, 10.0f);
+
+  // Case 2: f1 is disabled. f1 returns empty. f2 runs and should trigger.
+  f1_enabled = false;
+  // Update the lambda in the filter because std::function holds a copy of the closure,
+  // but we captured by reference [&], so the reference inside the copy points to our stack bool.
+  // So strictly speaking, changing f1_enabled should work without re-setting,
+  // PROVIDED the lambda object was copied correctly and simply holds the reference.
+  // C++ lambdas with [&] capture reference members. Copying the lambda copies the references (which are just pointers).
+  // So this should work directly.
+
+  sensor_.publish_state(0.0f);
+  EXPECT_EQ(callback_count, 2);
+  EXPECT_FLOAT_EQ(received_value, 20.0f);
+}
+
+TEST_F(FilterTest, ToNTCTemperatureFilter) {
+  // Standard 10k thermistor coefficients
+  // A = 1.129148e-3, B = 2.34125e-4, C = 8.76741e-8
+  double a = 1.129148e-3;
+  double b = 2.34125e-4;
+  double c = 8.76741e-8;
+
+  ToNTCTemperatureFilter filter(a, b, c);
+  sensor_.add_filter(&filter);
+
+  float received_value = NAN;
+  sensor_.add_on_state_callback([&](float value) { received_value = value; });
+
+  // 10k ohms -> approx 25C (298.15K)
+  sensor_.publish_state(10000.0f);
+  // Allow small error margin due to float precision and coefficient approximation
+  EXPECT_NEAR(received_value, 25.0f, 0.05f);
+
+  // 32650 ohms -> approx 0C
+  // log(32650) = 10.3936
+  sensor_.publish_state(32650.0f);
+  EXPECT_NEAR(received_value, 0.0f, 0.1f);
+}
+
+TEST_F(FilterTest, ToNTCResistanceFilter) {
+  // Standard 10k thermistor coefficients
+  double a = 1.129148e-3;
+  double b = 2.34125e-4;
+  double c = 8.76741e-8;
+
+  ToNTCResistanceFilter filter(a, b, c);
+  sensor_.add_filter(&filter);
+
+  float received_value = NAN;
+  sensor_.add_on_state_callback([&](float value) { received_value = value; });
+
+  // 25C -> approx 10k ohms
+  sensor_.publish_state(25.0f);
+  EXPECT_NEAR(received_value, 10000.0f, 5.0f);  // Resistance can vary quite a bit with small temp changes
+
+  // 0C -> approx 32650 ohms
+  sensor_.publish_state(0.0f);
+  EXPECT_NEAR(received_value, 32650.0f, 20.0f);
+}
+
 TEST_F(FilterTest, ThrottleAverageFilter) {
   set_millis(0);
   ThrottleAverageFilter filter(1000);
