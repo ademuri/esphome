@@ -67,6 +67,7 @@ def create_test_config(config_name: str, includes: list[str]) -> dict:
                 "build_flags": [
                     "-Og",  # optimize for debug
                     "-DESPHOME_TEST",
+                    f"-I{root_path}",
                 ],
                 "debug_build_flags": [  # only for debug builds
                     "-g3",  # max debug info

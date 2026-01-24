@@ -1,4 +1,7 @@
 #include <gtest/gtest.h>
+#include "esphome/core/preferences.h"
+
+namespace esphome {}
 
 /*
 This special main.cpp replaces the default one.
