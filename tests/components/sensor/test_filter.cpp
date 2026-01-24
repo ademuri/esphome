@@ -470,5 +470,441 @@ TEST_F(FilterTest, ThrottleFilter) {
   EXPECT_FLOAT_EQ(received_value, 30.0f);
 }
 
+TEST_F(FilterTest, ThrottleAverageFilter) {
+  set_millis(0);
+  ThrottleAverageFilter filter(1000);
+  filter.setup();
+  sensor_.add_filter(&filter);
+
+  // Scheduler adds a random offset (0-500ms) to the first interval
+  // Flush any immediate execution by advancing time and calling scheduler
+  set_millis(600);
+  App.scheduler.call(millis());
+
+  // Start the actual test scenario at 1000ms
+  set_millis(1000);
+
+  float received_value = NAN;
+  int callback_count = 0;
+  sensor_.add_on_state_callback([&](float value) {
+    received_value = value;
+    callback_count++;
+  });
+
+  // Interval scheduled at 1000 + 1000 = 2000
+
+  sensor_.publish_state(10.0f);
+  sensor_.publish_state(20.0f);
+  sensor_.publish_state(30.0f);
+
+  EXPECT_EQ(callback_count, 0);
+
+  set_millis(1500);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 0);
+
+  set_millis(2000);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 1);
+  EXPECT_FLOAT_EQ(received_value, 20.0f);  // Average of 10, 20, 30
+
+  // Next interval starts fresh
+  sensor_.publish_state(5.0f);
+
+  set_millis(3000);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 2);
+  EXPECT_FLOAT_EQ(received_value, 5.0f);
+}
+
+TEST_F(FilterTest, ThrottleWithPriorityFilter) {
+  set_millis(1000);
+  ThrottleWithPriorityFilter filter(1000, {50.0f});
+  sensor_.add_filter(&filter);
+
+  float received_value = NAN;
+  int callback_count = 0;
+  sensor_.add_on_state_callback([&](float value) {
+    received_value = value;
+    callback_count++;
+  });
+
+  sensor_.publish_state(10.0f);
+  EXPECT_EQ(callback_count, 1);
+  EXPECT_FLOAT_EQ(received_value, 10.0f);
+
+  set_millis(1500);
+  sensor_.publish_state(20.0f);
+  EXPECT_EQ(callback_count, 1);  // Throttled
+
+  sensor_.publish_state(50.0f);  // Priority value
+  EXPECT_EQ(callback_count, 2);
+  EXPECT_FLOAT_EQ(received_value, 50.0f);
+
+  set_millis(2100);  // 600ms after last successful send (50.0 at 1500ms)
+  // Logic: now - last_input >= min_time
+  // last_input was set at 1500. 2100 - 1500 = 600 < 1000. Throttled.
+  sensor_.publish_state(30.0f);
+  EXPECT_EQ(callback_count, 2);
+
+  set_millis(2500);  // 1000ms after last successful send
+  sensor_.publish_state(40.0f);
+  EXPECT_EQ(callback_count, 3);
+  EXPECT_FLOAT_EQ(received_value, 40.0f);
+}
+
+TEST_F(FilterTest, DebounceFilter) {
+  set_millis(1000);
+  DebounceFilter filter(1000);
+  sensor_.add_filter(&filter);
+  // DebounceFilter sets a timeout on new_value. It doesn't use setup().
+
+  float received_value = NAN;
+  int callback_count = 0;
+  sensor_.add_on_state_callback([&](float value) {
+    received_value = value;
+    callback_count++;
+  });
+
+  sensor_.publish_state(10.0f);
+  // Should set timeout for 2000ms
+  EXPECT_EQ(callback_count, 0);
+
+  set_millis(1500);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 0);
+
+  // New value before timeout cancels previous
+  sensor_.publish_state(20.0f);
+  // Should set timeout for 2500ms (1500 + 1000)
+
+  set_millis(2000);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 0);
+
+  set_millis(2500);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 1);
+  EXPECT_FLOAT_EQ(received_value, 20.0f);
+}
+
+TEST_F(FilterTest, HeartbeatFilter) {
+  set_millis(0);
+  HeartbeatFilter filter(1000);
+  filter.setup();
+  sensor_.add_filter(&filter);
+
+  set_millis(600);
+  App.scheduler.call(millis());
+
+  set_millis(1000);
+
+  float received_value = NAN;
+  int callback_count = 0;
+  sensor_.add_on_state_callback([&](float value) {
+    received_value = value;
+    callback_count++;
+  });
+
+  // Interval at 2000
+
+  sensor_.publish_state(10.0f);
+  EXPECT_EQ(callback_count, 0);  // Doesn't pass through first value by default
+
+  set_millis(1500);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 0);
+
+  set_millis(2000);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 1);
+  EXPECT_FLOAT_EQ(received_value, 10.0f);
+
+  set_millis(3000);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 2);
+  EXPECT_FLOAT_EQ(received_value, 10.0f);
+}
+
+TEST_F(FilterTest, TimeoutFilterLast) {
+  set_millis(1000);
+  TimeoutFilterLast filter(1000);
+  sensor_.add_filter(&filter);
+
+  float received_value = NAN;
+  int callback_count = 0;
+  sensor_.add_on_state_callback([&](float value) {
+    received_value = value;
+    callback_count++;
+  });
+
+  sensor_.publish_state(10.0f);
+  EXPECT_EQ(callback_count, 1);  // Passes through value
+  EXPECT_FLOAT_EQ(received_value, 10.0f);
+
+  // TimeoutFilterBase uses loop(), not Scheduler
+
+  set_millis(1500);
+  filter.loop();
+  EXPECT_EQ(callback_count, 1);
+
+  set_millis(2000);
+  filter.loop();
+  EXPECT_EQ(callback_count, 2);
+  EXPECT_FLOAT_EQ(received_value, 10.0f);
+
+  // After timeout, it disables loop until new value
+  // We skip calling loop() here because it should be disabled and calling it manually bypasses that.
+
+  sensor_.publish_state(20.0f);
+  EXPECT_EQ(callback_count, 3);
+  EXPECT_FLOAT_EQ(received_value, 20.0f);
+
+  set_millis(3000);  // 2000 (publish time) + 1000
+  filter.loop();     // Should be active again
+  EXPECT_EQ(callback_count, 4);
+  EXPECT_FLOAT_EQ(received_value, 20.0f);
+}
+
+TEST_F(FilterTest, TimeoutFilterConfigured) {
+  set_millis(1000);
+  TimeoutFilterConfigured filter(1000, 99.0f);
+  sensor_.add_filter(&filter);
+
+  float received_value = NAN;
+  int callback_count = 0;
+  sensor_.add_on_state_callback([&](float value) {
+    received_value = value;
+    callback_count++;
+  });
+
+  sensor_.publish_state(10.0f);
+  EXPECT_EQ(callback_count, 1);
+  EXPECT_FLOAT_EQ(received_value, 10.0f);
+
+  set_millis(2000);
+  filter.loop();
+  EXPECT_EQ(callback_count, 2);
+  EXPECT_FLOAT_EQ(received_value, 99.0f);
+}
+
+TEST_F(FilterTest, ThrottleAverageFilter) {
+  set_millis(0);
+  ThrottleAverageFilter filter(1000);
+  filter.setup();
+  sensor_.add_filter(&filter);
+
+  // Scheduler adds a random offset (0-500ms) to the first interval
+  // Flush any immediate execution by advancing time and calling scheduler
+  set_millis(600);
+  App.scheduler.call(millis());
+
+  // Start the actual test scenario at 1000ms
+  set_millis(1000);
+
+  float received_value = NAN;
+  int callback_count = 0;
+  sensor_.add_on_state_callback([&](float value) {
+    received_value = value;
+    callback_count++;
+  });
+
+  // Interval scheduled at 1000 + 1000 = 2000
+
+  sensor_.publish_state(10.0f);
+  sensor_.publish_state(20.0f);
+  sensor_.publish_state(30.0f);
+
+  EXPECT_EQ(callback_count, 0);
+
+  set_millis(1500);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 0);
+
+  set_millis(2000);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 1);
+  EXPECT_FLOAT_EQ(received_value, 20.0f);  // Average of 10, 20, 30
+
+  // Next interval starts fresh
+  sensor_.publish_state(5.0f);
+
+  set_millis(3000);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 2);
+  EXPECT_FLOAT_EQ(received_value, 5.0f);
+}
+
+TEST_F(FilterTest, ThrottleWithPriorityFilter) {
+  set_millis(1000);
+  ThrottleWithPriorityFilter filter(1000, {50.0f});
+  sensor_.add_filter(&filter);
+
+  float received_value = NAN;
+  int callback_count = 0;
+  sensor_.add_on_state_callback([&](float value) {
+    received_value = value;
+    callback_count++;
+  });
+
+  sensor_.publish_state(10.0f);
+  EXPECT_EQ(callback_count, 1);
+  EXPECT_FLOAT_EQ(received_value, 10.0f);
+
+  set_millis(1500);
+  sensor_.publish_state(20.0f);
+  EXPECT_EQ(callback_count, 1);  // Throttled
+
+  sensor_.publish_state(50.0f);  // Priority value
+  EXPECT_EQ(callback_count, 2);
+  EXPECT_FLOAT_EQ(received_value, 50.0f);
+
+  set_millis(2100);  // 600ms after last successful send (50.0 at 1500ms)
+  // Logic: now - last_input >= min_time
+  // last_input was set at 1500. 2100 - 1500 = 600 < 1000. Throttled.
+  sensor_.publish_state(30.0f);
+  EXPECT_EQ(callback_count, 2);
+
+  set_millis(2500);  // 1000ms after last successful send
+  sensor_.publish_state(40.0f);
+  EXPECT_EQ(callback_count, 3);
+  EXPECT_FLOAT_EQ(received_value, 40.0f);
+}
+
+TEST_F(FilterTest, DebounceFilter) {
+  set_millis(1000);
+  DebounceFilter filter(1000);
+  sensor_.add_filter(&filter);
+  // DebounceFilter sets a timeout on new_value. It doesn't use setup().
+
+  float received_value = NAN;
+  int callback_count = 0;
+  sensor_.add_on_state_callback([&](float value) {
+    received_value = value;
+    callback_count++;
+  });
+
+  sensor_.publish_state(10.0f);
+  // Should set timeout for 2000ms
+  EXPECT_EQ(callback_count, 0);
+
+  set_millis(1500);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 0);
+
+  // New value before timeout cancels previous
+  sensor_.publish_state(20.0f);
+  // Should set timeout for 2500ms (1500 + 1000)
+
+  set_millis(2000);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 0);
+
+  set_millis(2500);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 1);
+  EXPECT_FLOAT_EQ(received_value, 20.0f);
+}
+
+TEST_F(FilterTest, HeartbeatFilter) {
+  set_millis(0);
+  HeartbeatFilter filter(1000);
+  filter.setup();
+  sensor_.add_filter(&filter);
+
+  set_millis(600);
+  App.scheduler.call(millis());
+
+  set_millis(1000);
+
+  float received_value = NAN;
+  int callback_count = 0;
+  sensor_.add_on_state_callback([&](float value) {
+    received_value = value;
+    callback_count++;
+  });
+
+  // Interval at 2000
+
+  sensor_.publish_state(10.0f);
+  EXPECT_EQ(callback_count, 0);  // Doesn't pass through first value by default
+
+  set_millis(1500);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 0);
+
+  set_millis(2000);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 1);
+  EXPECT_FLOAT_EQ(received_value, 10.0f);
+
+  set_millis(3000);
+  App.scheduler.call(millis());
+  EXPECT_EQ(callback_count, 2);
+  EXPECT_FLOAT_EQ(received_value, 10.0f);
+}
+
+TEST_F(FilterTest, TimeoutFilterLast) {
+  set_millis(1000);
+  TimeoutFilterLast filter(1000);
+  sensor_.add_filter(&filter);
+
+  float received_value = NAN;
+  int callback_count = 0;
+  sensor_.add_on_state_callback([&](float value) {
+    received_value = value;
+    callback_count++;
+  });
+
+  sensor_.publish_state(10.0f);
+  EXPECT_EQ(callback_count, 1);  // Passes through value
+  EXPECT_FLOAT_EQ(received_value, 10.0f);
+
+  // TimeoutFilterBase uses loop(), not Scheduler
+
+  set_millis(1500);
+  filter.loop();
+  EXPECT_EQ(callback_count, 1);
+
+  set_millis(2000);
+  filter.loop();
+  EXPECT_EQ(callback_count, 2);
+  EXPECT_FLOAT_EQ(received_value, 10.0f);
+
+  // After timeout, it disables loop until new value
+  // We skip calling loop() here because it should be disabled and calling it manually bypasses that.
+
+  sensor_.publish_state(20.0f);
+  EXPECT_EQ(callback_count, 3);
+  EXPECT_FLOAT_EQ(received_value, 20.0f);
+
+  set_millis(3000);  // 2000 (publish time) + 1000
+  filter.loop();     // Should be active again
+  EXPECT_EQ(callback_count, 4);
+  EXPECT_FLOAT_EQ(received_value, 20.0f);
+}
+
+TEST_F(FilterTest, TimeoutFilterConfigured) {
+  set_millis(1000);
+  TimeoutFilterConfigured filter(1000, 99.0f);
+  sensor_.add_filter(&filter);
+
+  float received_value = NAN;
+  int callback_count = 0;
+  sensor_.add_on_state_callback([&](float value) {
+    received_value = value;
+    callback_count++;
+  });
+
+  sensor_.publish_state(10.0f);
+  EXPECT_EQ(callback_count, 1);
+  EXPECT_FLOAT_EQ(received_value, 10.0f);
+
+  set_millis(2000);
+  filter.loop();
+  EXPECT_EQ(callback_count, 2);
+  EXPECT_FLOAT_EQ(received_value, 99.0f);
+}
+
 }  // namespace
 }  // namespace esphome::sensor
