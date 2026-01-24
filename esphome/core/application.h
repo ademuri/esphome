@@ -314,6 +314,17 @@ class Application {
   /// Get the cached time in milliseconds from when the current component started its loop execution
   inline uint32_t IRAM_ATTR HOT get_loop_component_start_time() const { return this->loop_component_start_time_; }
 
+#ifdef ESPHOME_TEST
+  /** Set the loop component start time manually.
+   *
+   * This is only intended for use in unit tests to simulate time progression
+   * for time-dependent components (like filters) without running a full loop.
+   *
+   * @param time The time in milliseconds to set as the current loop start time.
+   */
+  void set_loop_component_start_time(uint32_t time) { this->loop_component_start_time_ = time; }
+#endif
+
   /** Set the target interval with which to run the loop() calls.
    * If the loop() method takes longer than the target interval, ESPHome won't
    * sleep in loop(), but if the time spent in loop() is small than the target, ESPHome

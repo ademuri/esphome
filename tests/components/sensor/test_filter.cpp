@@ -444,5 +444,31 @@ TEST_F(FilterTest, StreamingMovingAverageFilter) {
   EXPECT_FLOAT_EQ(received_value, 20.0f);
 }
 
+TEST_F(FilterTest, ThrottleFilter) {
+  ThrottleFilter filter(100);
+  sensor_.add_filter(&filter);
+
+  float received_value = NAN;
+  int callback_count = 0;
+  sensor_.add_on_state_callback([&](float value) {
+    received_value = value;
+    callback_count++;
+  });
+
+  set_millis(1000);
+  sensor_.publish_state(10.0f);
+  EXPECT_EQ(callback_count, 1);
+  EXPECT_FLOAT_EQ(received_value, 10.0f);
+
+  set_millis(1050);
+  sensor_.publish_state(20.0f);
+  EXPECT_EQ(callback_count, 1);  // Throttled
+
+  set_millis(1100);
+  sensor_.publish_state(30.0f);
+  EXPECT_EQ(callback_count, 2);
+  EXPECT_FLOAT_EQ(received_value, 30.0f);
+}
+
 }  // namespace
 }  // namespace esphome::sensor

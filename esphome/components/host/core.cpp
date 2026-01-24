@@ -11,15 +11,15 @@
 
 namespace esphome {
 
-void IRAM_ATTR HOT yield() { ::sched_yield(); }
-uint32_t IRAM_ATTR HOT millis() {
+void IRAM_ATTR HOT __attribute__((weak)) yield() { ::sched_yield(); }
+uint32_t IRAM_ATTR HOT __attribute__((weak)) millis() {
   struct timespec spec;
   clock_gettime(CLOCK_MONOTONIC, &spec);
   time_t seconds = spec.tv_sec;
   uint32_t ms = round(spec.tv_nsec / 1e6);
   return ((uint32_t) seconds) * 1000U + ms;
 }
-void IRAM_ATTR HOT delay(uint32_t ms) {
+void IRAM_ATTR HOT __attribute__((weak)) delay(uint32_t ms) {
   struct timespec ts;
   ts.tv_sec = ms / 1000;
   ts.tv_nsec = (ms % 1000) * 1000000;
@@ -28,14 +28,14 @@ void IRAM_ATTR HOT delay(uint32_t ms) {
     res = nanosleep(&ts, &ts);
   } while (res != 0 && errno == EINTR);
 }
-uint32_t IRAM_ATTR HOT micros() {
+uint32_t IRAM_ATTR HOT __attribute__((weak)) micros() {
   struct timespec spec;
   clock_gettime(CLOCK_MONOTONIC, &spec);
   time_t seconds = spec.tv_sec;
   uint32_t us = round(spec.tv_nsec / 1e3);
   return ((uint32_t) seconds) * 1000000U + us;
 }
-void IRAM_ATTR HOT delayMicroseconds(uint32_t us) {
+void IRAM_ATTR HOT __attribute__((weak)) delayMicroseconds(uint32_t us) {
   struct timespec ts;
   ts.tv_sec = us / 1000000U;
   ts.tv_nsec = (us % 1000000U) * 1000U;

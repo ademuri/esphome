@@ -66,6 +66,7 @@ def create_test_config(config_name: str, includes: list[str]) -> dict:
                 ],
                 "build_flags": [
                     "-Og",  # optimize for debug
+                    "-DESPHOME_TEST",
                 ],
                 "debug_build_flags": [  # only for debug builds
                     "-g3",  # max debug info
@@ -102,7 +103,11 @@ def run_tests(selected_components: list[str]) -> int:
 
     # Build a list of include folders, one folder per component containing tests.
     # A special replacement main.cpp is located in /tests/components/main.cpp
-    includes: list[str] = ["main.cpp"] + components
+    includes: list[str] = [
+        "main.cpp",
+        "test_helpers.h",
+        "test_helpers.cpp",
+    ] + components
 
     # Create a unique name for this config based on the actual components being tested
     # to maximize cache during testing
